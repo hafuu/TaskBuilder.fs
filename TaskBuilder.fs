@@ -23,7 +23,7 @@ module TaskBuilder =
     /// either awaiting something with a continuation,
     /// or completed with a return value.
     type Step<'a> =
-        | Await of ICriticalNotifyCompletion * (unit -> Step<'a>)
+        | Await of INotifyCompletion * (unit -> Step<'a>)
         | Return of 'a
         /// We model tail calls explicitly, but still can't run them without O(n) memory usage.
         | ReturnFrom of 'a Task
@@ -60,10 +60,11 @@ module TaskBuilder =
             /// Proceed to one of three states: result, failure, or awaiting.
             /// If awaiting, MoveNext() will be called again when the awaitable completes.
             member __.MoveNext() =
-                let mutable await = nextAwaitable()
-                if not (isNull await) then
-                    // Tell the builder to call us again when this thing is done.
-                    methodBuilder.AwaitUnsafeOnCompleted(&await, &self)    
+                // Tell the builder to call us again when this thing is done.
+                match nextAwaitable() with
+                | null -> ()
+                | :? ICriticalNotifyCompletion as await -> methodBuilder.AwaitUnsafeOnCompleted(ref await, &self)
+                | await -> methodBuilder.AwaitOnCompleted(ref await, &self)
             member __.SetStateMachine(_) = () // Doesn't really apply since we're a reference type.
 
     let unwrapException (agg : AggregateException) =
@@ -91,7 +92,7 @@ module TaskBuilder =
 
         static member inline GenericAwait< ^abl, ^awt, ^inp
                                             when ^abl : (member GetAwaiter : unit -> ^awt)
-                                            and ^awt :> ICriticalNotifyCompletion 
+                                            and ^awt :> INotifyCompletion 
                                             and ^awt : (member get_IsCompleted : unit -> bool)
                                             and ^awt : (member GetResult : unit -> ^inp) >
             (abl : ^abl, continuation : ^inp -> 'out Step) : 'out Step =
@@ -104,7 +105,7 @@ module TaskBuilder =
         static member inline GenericAwaitConfigureFalse< ^tsk, ^abl, ^awt, ^inp
                                                         when ^tsk : (member ConfigureAwait : bool -> ^abl)
                                                         and ^abl : (member GetAwaiter : unit -> ^awt)
-                                                        and ^awt :> ICriticalNotifyCompletion 
+                                                        and ^awt :> INotifyCompletion 
                                                         and ^awt : (member get_IsCompleted : unit -> bool)
                                                         and ^awt : (member GetResult : unit -> ^inp) >
             (tsk : ^tsk, continuation : ^inp -> 'out Step) : 'out Step =
